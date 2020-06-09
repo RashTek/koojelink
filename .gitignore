@@ -220,5 +220,5 @@ Temporary Items
 # mypy
 
 # Pyre type checker
-
+# A small comment.
 # End of https://www.toptal.com/developers/gitignore/api/macos,python,jupyternotebook,flask
