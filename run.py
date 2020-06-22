@@ -1,10 +1,12 @@
 from flask import Flask, request, jsonify, redirect, render_template
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+from datetime import datetime, date, timedelta
 import re
 import random
 import string
 import os
+from flask_script import Manager
+from flask_migrate import Migrate, MigrateCommand
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY")
@@ -12,15 +14,20 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///site.db"
 # app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
+migrate = Migrate(app, db)
+manager = Manager(app)
+manager.add_command("db", MigrateCommand)
+
 
 class Urls(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     long_url = db.Column(db.String(), unique=True, nullable=False)
     random_text = db.Column(db.String(6), unique=True, nullable=False)
-    # exp_date = db.Column(db.DateTime, nullable = False)
+    exp_date = db.Column(db.DateTime, default=datetime(2212, 12, 12))
+    # exp_date = db.Column(db.DateTime, nullable=False, default=datetime(2212,12,12))
 
     def __repr__(self):
-        return f"Urls('{self.long_url}', '{self.random_text}')"
+        return f"Urls('{self.long_url}', '{self.random_text}', '{self.exp_date}' )"
 
 
 def url_validator(url):
@@ -29,7 +36,7 @@ def url_validator(url):
         r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|"  # domain...
         r"localhost|"  # localhost...
         r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"  # ...or ip
-        r"(?::\d+)?"  # optional port
+        r"(?::\d+)?"  # optional port,
         r"(?:/?|[/?]\S+)$",
         re.IGNORECASE,
     )
@@ -49,25 +56,50 @@ def short_out(random_text):
 def search_for_url(Urls, random_text):
     match = Urls.query.filter_by(random_text=random_text).first()
     if match:
+        # if match.exp_date <= "2212-12-12":
         return match.long_url
     return False
 
 
-def add_url_to_db(l_url, s_url):
-    new_url = Urls(long_url=l_url, random_text=s_url.split("k/")[1],)
+def add_url_to_db(l_url, s_url, exp_date=None):
+    if exp_date is None:
+        new_url = Urls(long_url=l_url, random_text=s_url.split("k/")[1],)
+    else:
+        new_url = Urls(
+            long_url=l_url,
+            random_text=s_url.split("k/")[1],
+            exp_date=datetime.strptime(exp_date, "%Y-%m-%d"),
+        )
     db.session.add(new_url)
     db.session.commit()
+
+
+def validate_time_format(date_text):
+    try:
+        if date_text != datetime.strptime(date_text, "%Y-%m-%d").strftime("%Y-%m-%d"):
+            raise ValueError
+        return True
+    except ValueError:
+        return False
 
 
 @app.route("/", methods=["GET", "POST"])
 def handle_post_request():
     if request.method == "POST":
-        input_url = {"long_url": request.json["long_url"]}
-        long_url = input_url.get("long_url")
+        req_data = request.get_json()
+        long_url = req_data.get("long_url")
+        exp_date = req_data.get("exp_date")
         if url_validator(long_url):
             output_url = short_out(random_word())
-            add_url_to_db(long_url, output_url)
-            return output_url
+            if exp_date is None:
+                add_url_to_db(long_url, output_url)
+                return f"{output_url}"
+            elif exp_date is not None:
+                if validate_time_format(exp_date):
+                    add_url_to_db(long_url, output_url, exp_date)
+                    return f"{output_url}"
+                else:
+                    return "Incorrect data format, should be YYYY-MM-DD"
         else:
             return jsonify({"error": "wrong key:value input"})
     else:
@@ -86,8 +118,9 @@ def redirect_to_origin(random_text):
             <h3>Please retry with correct short link.</h3>
         </div>
         """
-        # return render_template('404.html')
+        return render_template("404.html")
 
 
 if __name__ == "__main__":
     app.run(debug=True)
+    # manager.run()
