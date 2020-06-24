@@ -23,7 +23,9 @@ class Urls(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     long_url = db.Column(db.String(), unique=True, nullable=False)
     random_text = db.Column(db.String(6), unique=True, nullable=False)
-    exp_date = db.Column(db.DateTime, default=datetime(2212, 12, 12))
+    exp_date = db.Column(
+        db.DateTime, default=datetime.strptime("2212-12-12", "%Y-%m-%d")
+    )
     # exp_date = db.Column(db.DateTime, nullable=False, default=datetime(2212,12,12))
 
     def __repr__(self):
@@ -56,14 +58,21 @@ def short_out(random_text):
 def search_for_url(Urls, random_text):
     match = Urls.query.filter_by(random_text=random_text).first()
     if match:
-        # if match.exp_date <= "2212-12-12":
-        return match.long_url
-    return False
+        if match.exp_date >= datetime.now():
+            return True, match.long_url
+        else:
+            return False, match.exp_date
+    else:
+        return None, None
 
 
 def add_url_to_db(l_url, s_url, exp_date=None):
     if exp_date is None:
-        new_url = Urls(long_url=l_url, random_text=s_url.split("k/")[1],)
+        new_url = Urls(
+            long_url=l_url,
+            random_text=s_url.split("k/")[1],
+            exp_date=datetime.strptime("2212-12-12", "%Y-%m-%d"),
+        )
     else:
         new_url = Urls(
             long_url=l_url,
@@ -109,16 +118,23 @@ def handle_post_request():
 @app.route("/koojelink/<string:random_text>")
 def redirect_to_origin(random_text):
     origin = search_for_url(Urls, random_text)
-    if origin:
+    if origin[0]:
         return redirect(origin)
-    else:
+    elif origin[0] == False:
+        return f"""
+        <div style='text-align: center;'>
+            <h1>Short link has been expired {origin[1]}</h1>
+            <h3>Please retry with a new short link.</h3>
+        </div>
+        """
+    elif origin[0] == None:
         return """
         <div style="text-align: center;">
             <h1>Pages does not found (Error 404).</h1>
             <h3>Please retry with correct short link.</h3>
         </div>
         """
-        return render_template("404.html")
+        # return render_template("404.html")
 
 
 if __name__ == "__main__":
