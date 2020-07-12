@@ -11,7 +11,7 @@ from flask_migrate import Migrate, MigrateCommand
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY")
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///site.db"
-# app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 migrate = Migrate(app, db)
@@ -55,41 +55,66 @@ def short_out(random_text):
     return f"https://koojelink/{random_text}"
 
 
+def long_url_exist(Urls, l_url):
+    return Urls.query.filter_by(long_url=l_url).first()
+
+
+def get_random_text(l_url_query):
+    return l_url_query.random_text if l_url_query is not None else None
+
+
+def random_text_exist(Urls, random_text):
+    return Urls.query.filter_by(random_text=random_text).first()
+
+
 def search_for_url(Urls, random_text):
-    match = Urls.query.filter_by(random_text=random_text).first()
+    match = random_text_exist(Urls, random_text)
     if match:
-        if match.exp_date >= datetime.now():
-            return True, match.long_url
-        else:
-            return False, match.exp_date
+        if match.exp_date is not None:
+            if match.exp_date >= datetime.now():
+                return True, match.long_url
+            else:
+                return False, match.exp_date
+        return None, None
     else:
         return None, None
 
 
-def add_url_to_db(l_url, s_url, exp_date=None):
+def get_exp(exp_date):
     if exp_date is None:
-        new_url = Urls(
-            long_url=l_url,
-            random_text=s_url.split("k/")[1],
-            exp_date=datetime.strptime("2212-12-12", "%Y-%m-%d"),
-        )
+        return datetime.strptime("2212-12-12", "%Y-%m-%d")
     else:
-        new_url = Urls(
-            long_url=l_url,
-            random_text=s_url.split("k/")[1],
-            exp_date=datetime.strptime(exp_date, "%Y-%m-%d"),
-        )
+        return datetime.strptime(exp_date, "%Y-%m-%d")
+
+
+def add_url_to_db(l_url, s_url, exp_date):
+    new_url = Urls(
+        long_url=l_url, random_text=s_url.split("k/")[1], exp_date=get_exp(exp_date),
+    )
     db.session.add(new_url)
     db.session.commit()
 
 
 def validate_time_format(date_text):
     try:
-        if date_text != datetime.strptime(date_text, "%Y-%m-%d").strftime("%Y-%m-%d"):
-            raise ValueError
-        return True
+        if date_text is None:
+            return True
+        else:
+            if date_text != datetime.strptime(date_text, "%Y-%m-%d").strftime(
+                "%Y-%m-%d"
+            ):
+                raise ValueError
+            return True
     except ValueError:
         return False
+
+
+def recreate_random_word():
+    while True:
+        r_txt = random_word()
+        if random_text_exist(Urls, r_txt) is None:
+            break
+    return short_out(r_txt)
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -99,16 +124,17 @@ def handle_post_request():
         long_url = req_data.get("long_url")
         exp_date = req_data.get("exp_date")
         if url_validator(long_url):
-            output_url = short_out(random_word())
-            if exp_date is None:
-                add_url_to_db(long_url, output_url)
-                return f"{output_url}"
-            elif exp_date is not None:
+            l_exist = long_url_exist(Urls, long_url)
+            if l_exist is None:
+                output_url = recreate_random_word()
                 if validate_time_format(exp_date):
                     add_url_to_db(long_url, output_url, exp_date)
                     return f"{output_url}"
                 else:
                     return "Incorrect data format, should be YYYY-MM-DD"
+            else:
+                return f"{short_out(get_random_text(l_exist))}"
+
         else:
             return jsonify({"error": "wrong key:value input"})
     else:
@@ -119,11 +145,11 @@ def handle_post_request():
 def redirect_to_origin(random_text):
     origin = search_for_url(Urls, random_text)
     if origin[0]:
-        return redirect(origin)
+        return redirect(origin[1])
     elif origin[0] == False:
         return f"""
         <div style='text-align: center;'>
-            <h1>Short link has been expired {origin[1]}</h1>
+            <h1>Short link has been expired at {origin[1]}</h1>
             <h3>Please retry with a new short link.</h3>
         </div>
         """
